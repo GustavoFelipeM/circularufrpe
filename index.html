@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cadê o Circular UFRPE?</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        #mapa { height: 300px; border-radius: 0.75rem; z-index: 10; }
+        .onibus-icon {
+            font-size: 26px;
+            text-align: center;
+            line-height: 26px;
+            filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.5));
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex flex-col items-center p-4">
+
+    <div class="w-full max-w-md bg-slate-800 rounded-2xl shadow-2xl p-4 mt-2 border border-slate-700">
+        
+        <div class="text-center mb-4">
+            <h1 class="text-2xl font-bold text-emerald-400">🚌 Cadê o Circular?</h1>
+            <div id="relogio" class="text-xl font-mono text-slate-300 mt-1">--:--</div>
+        </div>
+
+        <div class="w-full bg-slate-700 p-1 rounded-xl border border-slate-600 mb-4 shadow-inner">
+            <div id="mapa"></div>
+        </div>
+
+        <div class="bg-slate-700 rounded-xl p-4 border border-slate-600">
+            <p class="text-xs text-slate-400 mb-1">Status Estimado:</p>
+            <h2 id="status-texto" class="text-lg font-bold text-white mb-3">Sincronizando GPS...</h2>
+            
+            <div class="flex items-center justify-between text-sm">
+                <div class="flex flex-col w-[45%]">
+                    <span class="text-slate-400 text-xs">Última Parada</span>
+                    <span id="parada-anterior" class="font-semibold text-emerald-400 truncate">---</span>
+                </div>
+                <span class="text-slate-500 font-bold">➔</span>
+                <div class="flex flex-col w-[45%] text-right">
+                    <span class="text-slate-400 text-xs">Próxima Parada</span>
+                    <span id="proxima-parada" class="font-semibold text-emerald-400 truncate">---</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-slate-700/50 rounded-xl p-4 border border-slate-600 mt-4">
+            <p class="text-xs text-slate-300 mb-2 font-medium">Vi o ônibus! Ajustar mapa agora:</p>
+            <div class="flex gap-2">
+                <select id="parada-real" class="bg-slate-800 text-sm text-slate-200 p-2 rounded flex-1 border border-slate-600 focus:outline-none focus:border-emerald-500">
+                    <option value="Cegoe">Cegoe</option>
+                    <option value="Reitoria">Reitoria</option>
+                    <option value="Veterinaria">Veterinária</option>
+                    <option value="Setorial">Setorial</option>
+                    <option value="Pesca">Pesca</option>
+                    <option value="Ceagri">Ceagri</option>
+                    <option value="Zootecnia">Zootecnia</option>
+                </select>
+                <button onclick="calibrarGPS()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold py-2 px-4 rounded transition-colors shadow-lg">
+                    📍 Tá Aqui!
+                </button>
+            </div>
+            <p id="msg-calibracao" class="text-xs text-emerald-400 mt-2 hidden text-center font-bold">🗺️ GPS Recalibrado!</p>
+        </div>
+
+    </div>
+
+    <script>
+        const dadosJSON = {
+          "percurso": [
+            { "parada": "Zootecnia", "horarios": ["07:00h", "08:00h", "09:00h", "10:00h", "11:00h", "11:45h", "12:30h", "13:15h", "14:00h", "15:00h", "16:00h", "17:00h", "18:00h", "19:00h", null, null, null] },
+            { "parada": "Pesca", "horarios": ["07:04h", "08:04h", "09:04h", "10:04h", "11:04h", "11:49h", "12:34h", "13:19h", "14:04h", "15:04h", "16:04h", "17:04h", "18:04h", "19:04h", null, null, null] },
+            { "parada": "Ceagri", "horarios": ["07:05h", "08:05h", "09:05h", "10:05h", "11:05h", "11:50h", "12:35h", "13:20h", "14:05h", "15:05h", "16:05h", "17:05h", "18:05h", "19:05h", "20:00h", "20:50h", "21:50h"] },
+            { "parada": "Cegoe", "horarios": ["07:11h", "08:11h", "09:11h", "10:11h", "11:11h", "11:56h", "12:41h", "13:26h", "14:11h", "15:11h", "16:11h", "17:11h", "18:11h", "19:11h", "20:04h", "20:54h", "21:54h"] },
+            { "parada": "Reitoria", "horarios": ["07:15h", "08:15h", "09:15h", "10:15h", "11:15h", "12:00h", "12:45h", "13:30h", "14:15h", "15:15h", "16:15h", "17:15h", "18:15h", "19:15h", "20:08h", "20:58h", "21:58h"] },
+            { "parada": "Veterinaria", "horarios": ["07:19h", "08:19h", "09:19h", "10:19h", "11:19h", "12:04h", "12:49h", "13:34h", "14:19h", "15:19h", "16:19h", "17:19h", "18:19h", "19:19h", "20:12h", "21:02h", "22:02h"] },
+            { "parada": "Setorial", "horarios": ["07:20h", "08:20h", "09:20h", "10:20h", "11:20h", "12:05h", "12:50h", "13:35h", "14:20h", "15:20h", "16:20h", "17:20h", "18:20h", "19:20h", "20:13h", "21:03h", "22:03h"] },
+            { "parada": "Pesca", "horarios": ["07:23h", "08:23h", "09:23h", "10:23h", "11:23h", "12:08h", "12:53h", "13:38h", "14:23h", "15:23h", "16:23h", "17:23h", "18:23h", "19:23h", "20:16h", "21:06h", null] },
+            { "parada": "Ceagri", "horarios": ["07:24h", "08:24h", "09:24h", "10:24h", "11:24h", "12:09h", "12:54h", "13:39h", "14:24h", "15:24h", "16:24h", "17:24h", "18:24h", "19:24h", "20:17h", "21:07h", null] },
+            { "parada": "Zootecnia", "horarios": ["07:30h", "08:30h", "09:30h", "10:30h", "11:30h", "12:15h", "13:00h", "13:45h", "14:30h", "15:30h", "16:30h", "17:30h", "18:30h", null, null, null, null] }
+          ]
+        };
+
+        const coordenadas = {
+            "Zootecnia": [-8.020152507721168, -34.954406935201284],
+            "Cegoe": [-8.017494707418322, -34.94988229672944],
+            "Reitoria": [-8.014519127525809, -34.95042750469236],
+            "Setorial": [-8.016070437995399, -34.949318295549276],
+            "Pesca": [-8.01955803406732, -34.944212503344474],
+            "Ceagri": [-8.017768946322878, -34.94477854300464],
+            "Veterinaria": [-8.015192872576417, -34.94798038348911]
+        };
+
+        const viagensDoDia = [];
+        const totalHorarios = dadosJSON.percurso[0].horarios.length;
+
+        for (let i = 0; i < totalHorarios; i++) {
+            let isNight = dadosJSON.percurso.find(p => p.parada === "Zootecnia").horarios[i] === null;
+            let sequenciaDia = ["Cegoe", "Reitoria", "Veterinaria", "Setorial", "Pesca", "Ceagri", "Zootecnia"];
+            let sequenciaNoite = ["Cegoe", "Reitoria", "Veterinaria", "Setorial", "Ceagri"];
+            let rotaDesejada = isNight ? sequenciaNoite : sequenciaDia;
+
+            let cegoeData = dadosJSON.percurso.find(p => p.parada === "Cegoe");
+            let cegoeHoraStr = cegoeData.horarios[i];
+            if (!cegoeHoraStr) continue;
+
+            let [ch, cm] = cegoeHoraStr.replace('h', '').split(':').map(Number);
+            let cegoeAbs = (ch * 60) + cm;
+
+            let trajeto = [];
+            for (let seqNome of rotaDesejada) {
+                let paradasJSON = dadosJSON.percurso.filter(p => p.parada === seqNome);
+                
+                for (let p of paradasJSON) {
+                    let horaStr = p.horarios[i];
+                    if (!horaStr) continue;
+                    
+                    let [h, m] = horaStr.replace('h', '').split(':').map(Number);
+                    let tempoAbsoluto = (h * 60) + m;
+                    
+                    if (tempoAbsoluto >= cegoeAbs) {
+                        trajeto.push({ nome: seqNome, horaStr: horaStr, tempoAbsoluto: tempoAbsoluto });
+                        break; 
+                    }
+                }
+            }
+            
+            trajeto.sort((a, b) => a.tempoAbsoluto - b.tempoAbsoluto);
+            if (trajeto.length > 0) viagensDoDia.push(trajeto);
+        }
+
+        const mapa = L.map('mapa').setView([-8.017, -34.949], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(mapa);
+
+        for (const [nome, coord] of Object.entries(coordenadas)) {
+            L.circleMarker(coord, { radius: 5, color: '#10b981', fillOpacity: 1 }).bindPopup(nome).addTo(mapa);
+        }
+
+        const onibusIcon = L.divIcon({ html: '🚌', className: 'onibus-icon', iconSize: [26, 26], iconAnchor: [13, 13] });
+        let marcadorOnibus = null; 
+
+        // VARIÁVEL DE AJUSTE (O WAZE)
+        let offsetTempoGPS = 0; 
+
+        // === A LÓGICA DE CALIBRAÇÃO BLINDADA ===
+        function calibrarGPS() {
+            const paradaSelecionada = document.getElementById('parada-real').value;
+            const agora = new Date();
+            const tempoAtualReal = agora.getHours() * 60 + agora.getMinutes() + (agora.getSeconds() / 60);
+
+            let paradaMaisProxima = null;
+            let menorDiferenca = Infinity;
+
+            for (let trajeto of viagensDoDia) {
+                let paradaNaTabela = trajeto.find(p => p.nome === paradaSelecionada);
+                if (paradaNaTabela) {
+                    let diffReal = tempoAtualReal - paradaNaTabela.tempoAbsoluto;
+                    
+                    // REGRA DE OURO: O ônibus pode estar infinitamente atrasado, mas é FISICAMENTE IMPOSSÍVEL 
+                    // ele sair mais de 10 minutos ADIANTADO em relação à tabela oficial. 
+                    // Se a conta disser que ele tá 29 minutos adiantado, ignoramos, porque na verdade 
+                    // é o ônibus da viagem passada que tá brutalmente atrasado!
+                    if (diffReal < -10) {
+                        continue; 
+                    }
+
+                    let diferencaAbsoluta = Math.abs(diffReal);
+                    if (diferencaAbsoluta < menorDiferenca) {
+                        menorDiferenca = diferencaAbsoluta;
+                        paradaMaisProxima = paradaNaTabela;
+                    }
+                }
+            }
+
+            if (paradaMaisProxima) {
+                offsetTempoGPS = tempoAtualReal - paradaMaisProxima.tempoAbsoluto;
+
+                const msg = document.getElementById('msg-calibracao');
+                msg.classList.remove('hidden');
+                
+                let tipo = offsetTempoGPS < 0 ? "adiantado" : "atrasado";
+                let minAjuste = Math.abs(Math.round(offsetTempoGPS));
+                
+                msg.innerText = offsetTempoGPS === 0 
+                    ? `🗺️ Ajustado! Ônibus cravado no horário.`
+                    : `🗺️ Ajustado! Assumindo ${minAjuste} min de ${tipo === 'atrasado' ? 'atraso' : 'adianto'}.`;
+                
+                setTimeout(() => msg.classList.add('hidden'), 5000);
+                atualizarApp(); 
+            }
+        }
+
+        function atualizarApp() {
+            const agora = new Date();
+            const horas = agora.getHours().toString().padStart(2, '0');
+            const minutos = agora.getMinutes().toString().padStart(2, '0');
+            const segundos = agora.getSeconds().toString().padStart(2, '0');
+            document.getElementById('relogio').innerText = `${horas}:${minutos}:${segundos}`;
+
+            const tempoAtualReal = agora.getHours() * 60 + agora.getMinutes() + (agora.getSeconds() / 60);
+            const tempoAtualMinutos = tempoAtualReal - offsetTempoGPS; 
+
+            let viagemAtiva = null;
+            let proximaViagem = null;
+            let viagemAnterior = null; 
+
+            for (let trajeto of viagensDoDia) {
+                let inicioTrajeto = trajeto[0].tempoAbsoluto;
+                let fimTrajeto = trajeto[trajeto.length - 1].tempoAbsoluto;
+
+                if (tempoAtualMinutos >= inicioTrajeto && tempoAtualMinutos <= fimTrajeto) {
+                    viagemAtiva = trajeto;
+                    break;
+                }
+                if (tempoAtualMinutos > fimTrajeto) {
+                    viagemAnterior = trajeto;
+                }
+                if (tempoAtualMinutos < inicioTrajeto && !proximaViagem) {
+                    proximaViagem = trajeto;
+                }
+            }
+
+            let latAtual, lngAtual;
+
+            if (!viagemAtiva) {
+                if (proximaViagem) {
+                    document.getElementById('status-texto').innerText = "Aguardando saída da parada...";
+                    
+                    let ultimaParadaConhecida = viagemAnterior 
+                        ? viagemAnterior[viagemAnterior.length - 1].nome 
+                        : proximaViagem[0].nome;
+                    
+                    document.getElementById('parada-anterior').innerText = ultimaParadaConhecida;
+                    document.getElementById('proxima-parada').innerText = `${proximaViagem[0].nome} às ${proximaViagem[0].horaStr}`;
+                    
+                    if(coordenadas[ultimaParadaConhecida]) {
+                        latAtual = coordenadas[ultimaParadaConhecida][0];
+                        lngAtual = coordenadas[ultimaParadaConhecida][1];
+                    }
+                } else {
+                    document.getElementById('status-texto').innerText = "Fim do expediente 😴";
+                    document.getElementById('parada-anterior').innerText = "-";
+                    document.getElementById('proxima-parada').innerText = "-";
+
+                    if (viagemAnterior) {
+                        let ultimaParadaConhecida = viagemAnterior[viagemAnterior.length - 1].nome;
+                        if(coordenadas[ultimaParadaConhecida]) {
+                            latAtual = coordenadas[ultimaParadaConhecida][0];
+                            lngAtual = coordenadas[ultimaParadaConhecida][1];
+                        }
+                    }
+                }
+            } 
+            else {
+                let anterior = viagemAtiva[0];
+                let proximo = viagemAtiva[1];
+
+                for (let i = 0; i < viagemAtiva.length - 1; i++) {
+                    if (tempoAtualMinutos >= viagemAtiva[i].tempoAbsoluto && tempoAtualMinutos <= viagemAtiva[i + 1].tempoAbsoluto) {
+                        anterior = viagemAtiva[i];
+                        proximo = viagemAtiva[i + 1];
+                        break;
+                    }
+                }
+
+                document.getElementById('status-texto').innerText = offsetTempoGPS !== 0 ? "Em trânsito (Calibrado) 🚌💨" : "Em trânsito 🚌💨";
+                document.getElementById('parada-anterior').innerText = anterior.nome;
+                document.getElementById('proxima-parada').innerText = proximo.nome;
+
+                if (anterior.nome === proximo.nome) {
+                    latAtual = coordenadas[anterior.nome][0];
+                    lngAtual = coordenadas[anterior.nome][1];
+                } else {
+                    const tempoTotalTrecho = proximo.tempoAbsoluto - anterior.tempoAbsoluto;
+                    const tempoPercorrido = tempoAtualMinutos - anterior.tempoAbsoluto;
+                    const progresso = tempoTotalTrecho > 0 ? (tempoPercorrido / tempoTotalTrecho) : 0;
+
+                    const coordAnt = coordenadas[anterior.nome];
+                    const coordProx = coordenadas[proximo.nome];
+
+                    latAtual = coordAnt[0] + ((coordProx[0] - coordAnt[0]) * progresso);
+                    lngAtual = coordAnt[1] + ((coordProx[1] - coordAnt[1]) * progresso);
+                }
+            }
+
+            if (latAtual !== undefined && lngAtual !== undefined) {
+                if (!marcadorOnibus) {
+                    marcadorOnibus = L.marker([latAtual, lngAtual], {icon: onibusIcon}).addTo(mapa);
+                } else {
+                    marcadorOnibus.setLatLng([latAtual, lngAtual]);
+                }
+            }
+        }
+
+        atualizarApp();
+        setInterval(atualizarApp, 1000); 
+    </script>
+</body>
+</html>
