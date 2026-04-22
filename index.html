@@ -62,7 +62,7 @@
                     <option value="Ceagri">Ceagri</option>
                     <option value="Zootecnia">Zootecnia</option>
                 </select>
-                <button onclick="calibrarGPS()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold py-2 px-4 rounded transition-colors shadow-lg">
+                <button id="btn-calibrar" onclick="calibrarGPS()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold py-2 px-4 rounded transition-colors shadow-lg">
                     📍 Tá Aqui!
                 </button>
             </div>
@@ -145,11 +145,34 @@
         const onibusIcon = L.divIcon({ html: '🚌', className: 'onibus-icon', iconSize: [26, 26], iconAnchor: [13, 13] });
         let marcadorOnibus = null; 
 
-        // VARIÁVEL DE AJUSTE (O WAZE)
+        // VARIÁVEL DE AJUSTE (O WAZE) - AGORA SINCRONIZADA COM A NUVEM
         let offsetTempoGPS = 0; 
 
-        // === A LÓGICA DE CALIBRAÇÃO BLINDADA ===
-        function calibrarGPS() {
+        // === NOVA FUNÇÃO: BUSCA STATUS NA NUVEM A CADA 10 SEGUNDOS ===
+        async function buscarStatusDaNuvem() {
+            try {
+                const res = await fetch('/api/get-status');
+                const data = await res.json();
+                
+                // Só aceita o ajuste se foi feito nas últimas 2 horas
+                if (data && data.horario) {
+                    const horaAjuste = new Date(data.horario);
+                    const agora = new Date();
+                    const horasPassadas = (agora - horaAjuste) / (1000 * 60 * 60);
+                    
+                    if (horasPassadas < 2) {
+                        offsetTempoGPS = data.offset_minutos || 0;
+                    } else {
+                        offsetTempoGPS = 0; // Se tá muito velho, ignora
+                    }
+                }
+            } catch (erro) {
+                console.log("Erro ao buscar banco:", erro);
+            }
+        }
+
+        // === A LÓGICA DE CALIBRAÇÃO BLINDADA (AGORA SALVANDO NA NUVEM) ===
+        async function calibrarGPS() {
             const paradaSelecionada = document.getElementById('parada-real').value;
             const agora = new Date();
             const tempoAtualReal = agora.getHours() * 60 + agora.getMinutes() + (agora.getSeconds() / 60);
@@ -179,19 +202,40 @@
             }
 
             if (paradaMaisProxima) {
-                offsetTempoGPS = tempoAtualReal - paradaMaisProxima.tempoAbsoluto;
+                const novoOffset = tempoAtualReal - paradaMaisProxima.tempoAbsoluto;
+                
+                const btn = document.getElementById('btn-calibrar');
+                btn.innerText = "Enviando...";
 
-                const msg = document.getElementById('msg-calibracao');
-                msg.classList.remove('hidden');
-                
-                let tipo = offsetTempoGPS < 0 ? "adiantado" : "atrasado";
-                let minAjuste = Math.abs(Math.round(offsetTempoGPS));
-                
-                msg.innerText = offsetTempoGPS === 0 
-                    ? `🗺️ Ajustado! Ônibus cravado no horário.`
-                    : `🗺️ Ajustado! Assumindo ${minAjuste} min de ${tipo === 'atrasado' ? 'atraso' : 'adianto'}.`;
-                
-                setTimeout(() => msg.classList.add('hidden'), 5000);
+                // SALVANDO NO BANCO DE DADOS
+                try {
+                    await fetch('/api/calibrar', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            offset_minutos: novoOffset,
+                            parada: paradaSelecionada
+                        })
+                    });
+                    
+                    offsetTempoGPS = novoOffset; // Atualiza o próprio mapa na hora
+                    
+                    const msg = document.getElementById('msg-calibracao');
+                    msg.classList.remove('hidden');
+                    
+                    let tipo = offsetTempoGPS < 0 ? "adiantado" : "atrasado";
+                    let minAjuste = Math.abs(Math.round(offsetTempoGPS));
+                    
+                    msg.innerText = offsetTempoGPS === 0 
+                        ? `🗺️ Ajustado na nuvem! Ônibus cravado no horário.`
+                        : `🗺️ Nuvem atualizada! Assumindo ${minAjuste} min de ${tipo === 'atrasado' ? 'atraso' : 'adianto'} para todos.`;
+                    
+                    setTimeout(() => msg.classList.add('hidden'), 5000);
+                } catch(e) {
+                    alert("Erro ao conectar com a nuvem.");
+                }
+
+                btn.innerText = "📍 Tá Aqui!";
                 atualizarApp(); 
             }
         }
@@ -300,6 +344,10 @@
 
         atualizarApp();
         setInterval(atualizarApp, 1000); 
+        
+        // Vai no banco de dados a cada 10 segundos ver se alguém apertou o botão
+        setInterval(buscarStatusDaNuvem, 10000); 
+        buscarStatusDaNuvem(); // Busca logo que abre o site
     </script>
 </body>
 </html>
